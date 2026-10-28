@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # uv (fast package manager) copy kar rahe hain
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv

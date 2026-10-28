@@ -32,6 +32,7 @@ The application follows a standard RAG pipeline:
 - FastAPI REST endpoints for backend integrations
 - PostgreSQL + pgvector for vector indexing and retrieval
 - Local embedding model execution via FastEmbed
+- Redis caching for query embeddings and chat answers
 
 ## Tech Stack
 
@@ -51,10 +52,15 @@ The application follows a standard RAG pipeline:
 - Groq SDK
 - PyPDF
 - python-dotenv
+- Redis
 
 ### Database
 - PostgreSQL 16
 - pgvector extension
+
+### Cache
+- Redis 7
+- Query embedding and answer caching with a configurable TTL
 
 ## Repository Structure
 
@@ -71,12 +77,13 @@ rag/
 │   │   ├── main.tsx
 │   │   └── index.css
 │   ├── package.json
-│   ├── vite.config.ts
-│   └── README.md
+│   ├── package-lock.json
+│   └── vite.config.ts
 │
 ├── server/                    # FastAPI backend and app logic
 │   ├── app/
 │   │   ├── chunking.py
+│   │   ├── cache.py
 │   │   ├── config.py
 │   │   ├── db.py
 │   │   ├── embed.py
@@ -88,7 +95,7 @@ rag/
 │   ├── docker-compose.yml
 │   ├── pyproject.toml
 │   ├── uv.lock
-│   └── README.md
+│   └── .env                 # Local configuration; not committed
 │
 ├── .gitignore
 └── README.md                 # Project overview and setup guide
@@ -135,22 +142,12 @@ Files are validated during upload and rejected if unsupported.
 
 ## Configuration
 
-The backend reads environment variables from a `.env` file located in the `server` directory.
-
-Example `.env`:
-
-Create a local `.env` by copying the sample file in the `server` folder:
-
-```bash
-cp server/.env.example server/.env
-```
-
-Example `.env`:
+The backend reads environment variables from `server/.env`. Create this file locally using the following template. Do not commit it; it contains secrets and is ignored by Git.
 
 ```env
 DATABASE_URL=postgresql://raguser:change_me_local_password@localhost:5433/ragdb
 GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=openai/gpt-oss-120b
+GROQ_MODEL=llama-3.3-70b-versatile
 EMBED_MODEL=BAAI/bge-small-en-v1.5
 EMBED_DIM=384
 CHUNK_SIZE=800
@@ -169,10 +166,13 @@ CACHE_TTL_SECONDS=3600
 
 Notes:
 - `DATABASE_URL` should match your PostgreSQL configuration.
-- Docker Compose reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` from `server/.env` and uses them to build the API's database URL for the `db` service.
+- Set `POSTGRES_PASSWORD` to a strong local password. For Docker Compose, use a password without URL-reserved characters because Compose inserts it into the API database URL.
+- Docker Compose uses `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` to configure PostgreSQL and build the API database URL. The database is exposed to the host on port `5433`; containers connect to it on port `5432`.
 - `GROQ_API_KEY` is required for LLM answer generation.
 - `EMBED_DIM` must match the selected embedding model.
 - `CORS_ORIGINS` should include the frontend origin used by the React app.
+- `CACHE_ENABLED=false` disables Redis caching. When caching is enabled, `REDIS_URL` must point to a reachable Redis server.
+- `CACHE_TTL_SECONDS` controls how long embeddings and answers remain cached.
 
 ## Setup Instructions
 
@@ -185,7 +185,7 @@ cd rag
 
 ### 2. Set Up the Backend
 
-From the `server` directory:
+Create `server/.env` from the configuration above, then run these commands from the repository root:
 
 ```bash
 cd server
@@ -202,18 +202,21 @@ If you are not using `uv`, install dependencies with:
 pip install -e .
 ```
 
-### 3. Start PostgreSQL
+### 3. Start PostgreSQL and Redis
 
-You can run the database with Docker Compose:
+From a new terminal at the repository root, start PostgreSQL and Redis:
 
 ```bash
 cd server
 docker compose up -d db redis
 ```
 
-This starts PostgreSQL with the pgvector extension and Redis for query/answer caching.
+PostgreSQL is exposed to the host on port `5433`; Redis is exposed on `localhost:6379`.
+For a locally run API, set `CACHE_ENABLED=false` in `server/.env` to disable Redis caching.
 
 ### 4. Start the API Server
+
+In another terminal at the repository root:
 
 ```bash
 cd server
@@ -226,7 +229,7 @@ The API will be available at:
 
 ### 5. Start the Frontend
 
-Open a second terminal and run:
+In another terminal at the repository root:
 
 ```bash
 cd client
@@ -239,7 +242,7 @@ The frontend will run at:
 
 ## Running with Docker
 
-The project includes a `docker-compose.yml` for the database and the API service. From the `server` directory:
+The project includes a `docker-compose.yml` for PostgreSQL, Redis, and the API. Create `server/.env` first, then run this from the repository root:
 
 ```bash
 cd server
@@ -303,7 +306,7 @@ Request body:
 
 `document_id` is optional. If omitted, the system searches across all uploaded documents.
 
-Response:
+Response (`cached` is `true` for a Redis answer-cache hit and `false` for a newly generated answer):
 
 ```json
 {
@@ -313,9 +316,12 @@ Response:
       "filename": "example.pdf",
       "score": 0.87
     }
-  ]
+  ],
+  "cached": false
 }
 ```
+
+Answers without matching document context are not cached. After a successful upload, the Redis corpus version is incremented so answer-cache entries from the previous corpus are no longer used. Query embeddings use a separate cache and remain available until their TTL expires. If Redis is unavailable, cache reads and writes are skipped and the API continues without cache.
 
 ## Backend Components
 
@@ -326,7 +332,10 @@ Defines application settings and loads environment variables.
 Initializes the PostgreSQL connection and creates the required vector tables and indexes.
 
 ### `app/embed.py`
-Loads and reuses the embedding model, then converts text into vector representations.
+Loads and reuses the embedding model, caches query embeddings in Redis, and converts text into vector representations.
+
+### `app/cache.py`
+Implements Redis caching for query embeddings and chat answers, including TTL handling and answer invalidation after document uploads.
 
 ### `app/chunking.py`
 Splits large documents into smaller overlapping chunks for better retrieval quality.
@@ -362,7 +371,8 @@ Key components:
 - The backend is designed to preprocess and load the embedding model once at startup to reduce initial latency.
 - `pgvector` is used for cosine similarity search, which is ideal for semantic retrieval.
 - The app stores only the uploaded file name and text chunks, with embeddings kept in the vector database.
-- The current implementation focuses on local embedding generation and retrieval quality rather than advanced caching or authentication.
+- FastEmbed model files use a separate Docker volume (`model_cache`); Redis caches query embeddings and generated answers.
+- Redis cache failures are logged and fall back to uncached operation. The cache is not authentication; the API currently has no authentication or per-user data isolation.
 
 ## Future Enhancements
 
@@ -374,7 +384,7 @@ Possible improvements for this project include:
 - Hybrid search with keyword + vector retrieval
 - Reranking for improved relevance
 - Authentication and authorization
-- Dockerized full-stack startup for one-command developer setup
+- Dockerized frontend startup for one-command full-stack development
 - Monitoring, logs, and evaluation metrics
 
 ## License
