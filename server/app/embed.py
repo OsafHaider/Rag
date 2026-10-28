@@ -1,13 +1,14 @@
 import numpy as np
 from fastembed import TextEmbedding
 
+from app import cache
 from app.config import settings
 
 _model: TextEmbedding | None = None
 
 
 def get_model() -> TextEmbedding:
-    """Load the model only on first use (download + memory), then reuse it."""
+    """Model sirf pehli dafa load hota hai (download + memory), phir reuse."""
     global _model
     if _model is None:
         _model = TextEmbedding(model_name=settings.embed_model)
@@ -15,12 +16,18 @@ def get_model() -> TextEmbedding:
 
 
 def embed_passages(texts: list[str]) -> list[np.ndarray]:
-    """Convert document chunks into vectors."""
+    """Document chunks ko vectors mein badalta hai."""
     model = get_model()
     return [np.asarray(v, dtype=np.float32) for v in model.passage_embed(texts)]
 
 
 def embed_query(query: str) -> np.ndarray:
-    """Convert the user's query into a vector (bge models use a separate query prefix)."""
+    """User ki query ko vector mein badalta hai (bge models query ke liye alag prefix use karte hain)."""
+    cached = cache.get_embedding(query)
+    if cached is not None:
+        return cached
+
     model = get_model()
-    return np.asarray(next(iter(model.query_embed(query))), dtype=np.float32)
+    vec = np.asarray(next(iter(model.query_embed(query))), dtype=np.float32)
+    cache.set_embedding(query, vec)
+    return vec

@@ -98,17 +98,26 @@ rag/
 
 ```mermaid
 flowchart LR
-    User --> Frontend
-    Frontend -->|Upload document| API
-    API --> Ingestion
-    Ingestion --> Database
-    Ingestion --> Embeddings
-    Query --> API
-    API --> Search
-    Search --> Database
-    Search --> LLM
-    LLM --> Answer
-    Answer --> Frontend
+    User([User]) --> FE[React Frontend]
+
+    subgraph UP["1. Upload flow"]
+        direction LR
+        U1["POST /api/upload"] --> U2["Extract text<br/>txt / pdf"] --> U3["Clean text"] --> U4["Chunking<br/>800 chars, overlap 150"]
+        U4 --> U5["Embeddings<br/>fastembed bge-small"] --> U6[("PostgreSQL + pgvector<br/>documents, chunks<br/>+ HNSW index")] --> U8["Bump cache version"]
+    end
+
+    subgraph QY["2. Query flow"]
+        direction LR
+        Q1["POST /api/chat"] --> Q2["Normalize query"] --> Q3{"Redis answer<br/>cache?"}
+        Q3 -->|miss| Q4["Query embedding<br/>(cached)"] --> Q5["HNSW search<br/>top 5 chunks"] --> Q6["Groq LLM<br/>chunks + question"] --> Q7["Save answer<br/>in cache"] --> Q9["Answer"]
+        Q3 -->|hit| Q9
+    end
+
+    FE -->|upload file| U1
+    FE -->|ask question| Q1
+    U8 -.->|old answers invalid| Q3
+    U6 -.->|vectors| Q5
+    Q9 --> FE
 ```
 
 ## Supported File Types
@@ -153,10 +162,14 @@ CORS_ORIGINS=http://localhost:5173
 POSTGRES_USER=raguser
 POSTGRES_PASSWORD=change_me_local_password
 POSTGRES_DB=ragdb
+CACHE_ENABLED=true
+REDIS_URL=redis://localhost:6379/0
+CACHE_TTL_SECONDS=3600
 ```
 
 Notes:
 - `DATABASE_URL` should match your PostgreSQL configuration.
+- Docker Compose reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` from `server/.env` and uses them to build the API's database URL for the `db` service.
 - `GROQ_API_KEY` is required for LLM answer generation.
 - `EMBED_DIM` must match the selected embedding model.
 - `CORS_ORIGINS` should include the frontend origin used by the React app.
@@ -195,10 +208,10 @@ You can run the database with Docker Compose:
 
 ```bash
 cd server
-docker compose up -d db
+docker compose up -d db redis
 ```
 
-This starts PostgreSQL with the pgvector extension installed.
+This starts PostgreSQL with the pgvector extension and Redis for query/answer caching.
 
 ### 4. Start the API Server
 
@@ -235,6 +248,7 @@ docker compose up --build
 
 This starts:
 - PostgreSQL database with pgvector
+- Redis cache
 - API container exposed on port 8000
 
 ## API Endpoints

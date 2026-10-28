@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-raguser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpass}
       POSTGRES_DB: ${POSTGRES_DB:-ragdb}
     ports:
       - "5433:5432"
@@ -17,19 +17,33 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build: .
     container_name: rag_api
     restart: unless-stopped
     env_file: .env
     environment:
-      # Inside the container, the database host is "db" rather than localhost
-      DATABASE_URL: postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-change_me_local_password}@db:5432/${POSTGRES_DB:-ragdb}
+      # Container ke andar DB ka host "db" hota hai, localhost nahi
+      DATABASE_URL: postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@db:5432/${POSTGRES_DB:-ragdb}
+      REDIS_URL: redis://redis:6379/0
       FASTEMBED_CACHE_PATH: /code/.cache/fastembed
     ports:
       - "8000:8000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - model_cache:/code/.cache/fastembed   # embedding model dobara download na ho
