@@ -1,18 +1,18 @@
 services:
   db:
-    image: pgvector/pgvector:pg16        # Postgres 16 + pgvector extension pehle se installed
+    image: pgvector/pgvector:pg16        # PostgreSQL 16 with the pgvector extension preinstalled.
     container_name: rag_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-raguser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpass}
-      POSTGRES_DB: ${POSTGRES_DB:-ragdb}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the root .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the root .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the root .env}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raguser} -d ${POSTGRES_DB:-ragdb}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -32,12 +32,14 @@ services:
     build: .
     container_name: rag_api
     restart: unless-stopped
-    env_file: .env
     environment:
-      # Container ke andar DB ka host "db" hota hai, localhost nahi
-      DATABASE_URL: postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@db:5432/${POSTGRES_DB:-ragdb}
+      APP_ENV: ${APP_ENV:-development}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      # Inside the container, use "db" as the database host instead of localhost.
+      DATABASE_URL_LOCAL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
-      FASTEMBED_CACHE_PATH: /code/.cache/fastembed
+      CACHE_ENABLED: ${CACHE_ENABLED:-true}
     ports:
       - "8000:8000"
     depends_on:
@@ -46,7 +48,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - model_cache:/code/.cache/fastembed   # embedding model dobara download na ho
+      - model_cache:/home/appuser/.cache/fastembed   # Avoid downloading the embedding model again.
 
 volumes:
   pgdata:

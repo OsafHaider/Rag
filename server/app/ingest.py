@@ -10,7 +10,7 @@ from app.embed import embed_passages
 
 
 def extract_text(filename: str, data: bytes) -> str:
-    """File ke bytes se plain text nikalta hai (text files + PDF)."""
+    """Extract plain text from file bytes (text files and PDFs)."""
     if filename.lower().endswith(".pdf"):
         reader = PdfReader(io.BytesIO(data))
         return "\n\n".join((page.extract_text() or "") for page in reader.pages)
@@ -19,13 +19,13 @@ def extract_text(filename: str, data: bytes) -> str:
 
 def ingest_document(filename: str, data: bytes) -> tuple[int, int]:
     """
-    Pura pipeline: text nikalo -> chunks -> embeddings -> DB mein save.
+    Process the document: extract text, create chunks and embeddings, and save them to the database.
     Returns (document_id, chunks_count)
     """
     text = extract_text(filename, data).replace("\x00", "")
     chunks = chunk_text(text, settings.chunk_size, settings.chunk_overlap)
     if not chunks:
-        raise ValueError("File mein koi readable text nahi mila")
+        raise ValueError("The uploaded file contains no readable text.")
 
     vectors = embed_passages(chunks)
 
@@ -44,7 +44,7 @@ def ingest_document(filename: str, data: bytes) -> tuple[int, int]:
                 [(doc_id, i, c, v) for i, (c, v) in enumerate(zip(chunks, vectors))],
             )
 
-    # DB commit ho chuka hai, ab purane cached jawab invalid kar do
+    # The database transaction has committed; invalidate cached answers.
     cache.bump_version()
 
     return doc_id, len(chunks)

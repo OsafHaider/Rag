@@ -7,7 +7,7 @@ _client: Groq | None = None
 SYSTEM_PROMPT = (
     "You are a helpful assistant. Answer only from the provided CONTEXT. "
     "If the answer is not present in the context, clearly state that the file does not contain this information. "
-    "Respond in the same language the user asked in (English / Urdu / Roman Urdu). "
+    "Respond in the same language as the user's question. "
     "Keep the answer brief and clear."
 )
 
@@ -16,7 +16,7 @@ def get_client() -> Groq:
     global _client
     if _client is None:
         if not settings.groq_api_key:
-            raise RuntimeError("GROQ_API_KEY is not set in the .env file")
+            raise RuntimeError("GROQ_API_KEY is not configured.")
         _client = Groq(api_key=settings.groq_api_key)
     return _client
 

@@ -1,15 +1,15 @@
 """
 Redis cache layer.
 
-Do cheezen cache hoti hain:
-  1. Query embeddings  -> same sawal par embedding model dobara nahi chalta
-  2. Final jawab (answer + sources) -> same sawal par na search hoti hai, na Groq call
+This module caches two types of data:
+  1. Query embeddings, avoiding repeated embedding generation for identical queries.
+  2. Final answers and sources, avoiding repeated searches and Groq calls for identical queries.
 
-Naya document upload hone par `bump_version()` chalta hai. Jawab ki cache key mein
-yeh version shamil hai, is liye purane jawab khud bekaar ho jate hain (koi delete nahi karna parta).
+When a document is uploaded, `bump_version()` increments the corpus version. This version
+is included in answer cache keys, making previous answers inaccessible without deleting them.
 
-Agar Redis band ho ya REDIS_URL khali ho, to cache chup chap skip hota hai
-aur app bina cache ke normal chalti hai.
+If Redis is unavailable or `REDIS_URL` is empty, caching is skipped and the application
+continues to operate without the cache.
 """
 import hashlib
 import json
@@ -33,14 +33,14 @@ def _get() -> redis.Redis | None:
     if _client is None:
         _client = redis.Redis.from_url(
             settings.redis_url,
-            socket_connect_timeout=0.5,  # Redis down ho to request atke nahi
+            socket_connect_timeout=0.5,  # Prevent requests from stalling when Redis is unavailable.
             socket_timeout=0.5,
         )
     return _client
 
 
 def normalize(query: str) -> str:
-    """'  Refund  POLICY? ' aur 'refund policy?' ek hi key banayen."""
+    """Normalize equivalent queries to the same cache key regardless of case or whitespace."""
     return re.sub(r"\s+", " ", query.strip().lower())
 
 
@@ -145,7 +145,7 @@ def set_answer(
 
 
 def bump_version() -> None:
-    """Naya document aaya: purane saare cached jawab invalid."""
+    """Invalidate cached answers after a new document is added."""
     r = _get()
     if r is None:
         return

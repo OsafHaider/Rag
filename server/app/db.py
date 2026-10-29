@@ -6,10 +6,16 @@ from pgvector.psycopg import register_vector
 from app.config import settings
 
 
+def _connect(**kwargs):
+    if settings.app_env == "production":
+        kwargs["sslmode"] = "require"
+    return psycopg.connect(settings.database_url, **kwargs)
+
+
 @contextmanager
 def get_conn():
     """Create a fresh connection for each request. Commit and close it when the block ends."""
-    with psycopg.connect(settings.database_url) as conn:
+    with _connect() as conn:
         register_vector(conn)  # map the vector type to Python/numpy objects
         yield conn
 
@@ -17,7 +23,7 @@ def get_conn():
 def init_db() -> None:
     """Run on startup: create the extension, tables, and indexes if they do not exist."""
     # The extension must be created first; otherwise register_vector will not work
-    with psycopg.connect(settings.database_url, autocommit=True) as conn:
+    with _connect(autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     with get_conn() as conn:

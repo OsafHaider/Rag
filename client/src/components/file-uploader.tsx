@@ -8,10 +8,13 @@ interface Props {
   onSuccess: (fileName: string) => void;
 }
 
-// Only text files are allowed
-const ALLOWED_EXT = [".txt", ".md", ".csv", ".json", ".log","pdf"];
+// Allow supported text and PDF document types.
+const ALLOWED_EXT = [".txt", ".md", ".csv", ".json", ".log", ".pdf"];
 
-export default function FileUploader({ uploadUrl = "/api/upload", onSuccess }: Props) {
+export default function FileUploader({
+  uploadUrl = "/api/upload",
+  onSuccess,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
@@ -27,7 +30,7 @@ export default function FileUploader({ uploadUrl = "/api/upload", onSuccess }: P
   const upload = (file: File) => {
     if (!isTextFile(file)) {
       setStatus("error");
-      setError("Only text files are allowed (.txt, .md, .csv, .json, .log)");
+      setError("Only supported text files and PDFs are allowed.");
       return;
     }
 
@@ -106,7 +109,7 @@ export default function FileUploader({ uploadUrl = "/api/upload", onSuccess }: P
               ⬆
             </motion.div>
             <h3>Drop a text file here</h3>
-            <p>or click to select one (.txt, .md, .csv, .json)</p>
+            <p>or click to select one (.txt, .md, .csv, .json, .log, .pdf)</p>
           </motion.div>
         )}
 

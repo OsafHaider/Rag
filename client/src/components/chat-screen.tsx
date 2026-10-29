@@ -14,7 +14,10 @@ interface Props {
 
 const uid = () => Math.random().toString(36).slice(2);
 
-export default function ChatScreen({ initialQuery, chatUrl = "/api/chat" }: Props) {
+export default function ChatScreen({
+  initialQuery,
+  chatUrl = "/api/chat",
+}: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,7 +41,11 @@ export default function ChatScreen({ initialQuery, chatUrl = "/api/chat" }: Prop
     } catch {
       setMessages((prev) => [
         ...prev,
-        { id: uid(), role: "ai", text: "Sorry, there was an issue retrieving the answer. Please try again." },
+        {
+          id: uid(),
+          role: "ai",
+          text: "Sorry, there was an issue retrieving the answer. Please try again.",
+        },
       ]);
     } finally {
       setLoading(false);

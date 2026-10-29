@@ -1,11 +1,5 @@
-import DocumentChatFlow from "./components/parent"
+import DocumentChatFlow from "./components/parent";
 
-const App = () => {
-  return (
-    <div>
-      <DocumentChatFlow/>
-    </div>
-  )
-}
+const App = () => <DocumentChatFlow />;
 
-export default App
+export default App;

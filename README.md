@@ -1,301 +1,111 @@
-# RAG Document Chat Application
+# RAG Document Chat
 
-A full-stack Retrieval-Augmented Generation (RAG) application that lets users upload document files, convert them into searchable vector chunks, and ask questions about the uploaded content using a language model.
+A full-stack Retrieval-Augmented Generation application for uploading text documents and PDFs, searching their contents, and asking questions grounded in the uploaded material.
 
-This project combines:
-- A React + TypeScript frontend for the user experience
-- A FastAPI backend for ingestion, retrieval, and chat APIs
-- PostgreSQL with the pgvector extension for efficient vector similarity search
-- FastEmbed for local embedding generation
-- Groq for grounded LLM responses
+## Architecture
 
-## Project Overview
+- **Frontend:** React, TypeScript, and Vite (`client/`)
+- **API:** FastAPI and FastEmbed (`server/`)
+- **Database:** PostgreSQL with the `pgvector` extension
+- **Answer generation:** Groq
+- **Optional cache:** Redis
 
-The application follows a standard RAG pipeline:
+The API stores document text chunks and embeddings in PostgreSQL. Uploaded files are processed in memory and are not retained as files. The embedding model is downloaded when the API starts.
 
-1. The user uploads a supported file.
-2. The backend extracts readable text from the file.
-3. The text is split into overlapping chunks.
-4. Each chunk is converted into an embedding vector.
-5. The embeddings are stored in PostgreSQL using pgvector.
-6. When a question is asked, the query is embedded and matched against stored chunks.
-7. Relevant chunks are retrieved and sent to the LLM as context.
-8. The model generates a grounded answer based only on the retrieved context.
+Retrieved document chunks and the question are sent to Groq to generate each answer. Documents remain in PostgreSQL until removed directly from the database; the application does not currently provide a document deletion endpoint. Confirm that your data-handling requirements permit this storage and third-party processing before uploading sensitive documents.
 
-## Features
+## Security notice
 
-- File upload support for text and PDF files
-- Document ingestion pipeline with chunking and vector storage
-- Similarity search over stored embeddings
-- Question answering grounded in uploaded documents
-- Multi-stage UI flow: upload -> search -> chat
-- FastAPI REST endpoints for backend integrations
-- PostgreSQL + pgvector for vector indexing and retrieval
-- Local embedding model execution via FastEmbed
-- Redis caching for query embeddings and chat answers
+The API does not require authentication. Anyone who can reach the deployed API can upload documents and query the shared corpus. Do not deploy it publicly or upload sensitive documents unless access is restricted by a trusted platform-level access control layer. Per-user accounts, document ownership, and authorization are not implemented.
 
-## Tech Stack
+## Environment variables
 
-### Frontend
-- React 19
-- TypeScript
-- Vite
-- Framer Motion
+Use one root `.env` file for local development. Copy the example once if you do not already have `.env`:
 
-### Backend
-- Python 3.14+
-- FastAPI
-- Uvicorn
-- Psycopg
-- pgvector
-- FastEmbed
-- Groq SDK
-- PyPDF
-- python-dotenv
-- Redis
-
-### Database
-- PostgreSQL 16
-- pgvector extension
-
-### Cache
-- Redis 7
-- Query embedding and answer caching with a configurable TTL
-
-## Repository Structure
-
-```text
-rag/
-├── client/                     # React frontend
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── chat-screen.tsx
-│   │   │   ├── file-uploader.tsx
-│   │   │   ├── parent.tsx
-│   │   │   └── searchbar.tsx
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   └── index.css
-│   ├── package.json
-│   ├── package-lock.json
-│   └── vite.config.ts
-│
-├── server/                    # FastAPI backend and app logic
-│   ├── app/
-│   │   ├── chunking.py
-│   │   ├── cache.py
-│   │   ├── config.py
-│   │   ├── db.py
-│   │   ├── embed.py
-│   │   ├── ingest.py
-│   │   ├── llm.py
-│   │   ├── main.py
-│   │   └── search.py
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   ├── pyproject.toml
-│   ├── uv.lock
-│   └── .env                 # Local configuration; not committed
-│
-├── .gitignore
-└── README.md                 # Project overview and setup guide
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-## High-Level Architecture
+Set your Groq API key in the root `.env` before asking questions.
 
-```mermaid
-flowchart LR
-    User([User]) --> FE[React Frontend]
+### Local `.env` variables
 
-    subgraph UP["1. Upload flow"]
-        direction LR
-        U1["POST /api/upload"] --> U2["Extract text<br/>txt / pdf"] --> U3["Clean text"] --> U4["Chunking<br/>800 chars, overlap 150"]
-        U4 --> U5["Embeddings<br/>fastembed bge-small"] --> U6[("PostgreSQL + pgvector<br/>documents, chunks<br/>+ HNSW index")] --> U8["Bump cache version"]
-    end
+| Variable | Development | Production |
+|---|---|---|
+| `DATABASE_URL_LOCAL` | Local PostgreSQL URL on `localhost:5433` | Not used |
+| `DATABASE_URL_PRODUCTION` | Leave empty | Set in the Render API service to the PostgreSQL provider's private connection URL |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Local Docker Compose database credentials | Not used |
+| `GROQ_API_KEY` | Your development Groq key | Your production Groq key |
+| `VITE_API_BASE_URL` | `http://localhost:8000` | Set in the frontend build environment to the API's public HTTPS URL |
+| `CACHE_ENABLED` | `true` for local Redis; set `false` to disable caching | Set in the Render API service; use `true` only with Redis |
+| `REDIS_URL` | `redis://localhost:6379/0` | Set in the Render API service to a private Redis URL when caching is enabled |
 
-    subgraph QY["2. Query flow"]
-        direction LR
-        Q1["POST /api/chat"] --> Q2["Normalize query"] --> Q3{"Redis answer<br/>cache?"}
-        Q3 -->|miss| Q4["Query embedding<br/>(cached)"] --> Q5["HNSW search<br/>top 5 chunks"] --> Q6["Groq LLM<br/>chunks + question"] --> Q7["Save answer<br/>in cache"] --> Q9["Answer"]
-        Q3 -->|hit| Q9
-    end
+The backend and Vite both load the root `.env`. Docker Compose reads it with `--env-file`, requires local PostgreSQL credentials from it, and constructs a container-only URL. The backend selects `DATABASE_URL_LOCAL` in development and `DATABASE_URL_PRODUCTION` only when `APP_ENV=production`; production will fail startup if its URL is missing or points to a local database. No production URL is currently present in this repository's local environment file. Set the actual existing production database URL in Render's API service as a secret; do not point production at the development database. The application never creates, migrates, or deletes the managed database resource itself, but initializes its tables on startup.
 
-    FE -->|upload file| U1
-    FE -->|ask question| Q1
-    U8 -.->|old answers invalid| Q3
-    U6 -.->|vectors| Q5
-    Q9 --> FE
+The following stable settings are defaults in `server/app/config.py` and do not need `.env` entries: `GROQ_MODEL`, `EMBED_MODEL`, `EMBED_DIM`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `MAX_UPLOAD_MB`, and `CACHE_TTL_SECONDS`. `APP_ENV` defaults to `development`; set `APP_ENV=production` in the Render API service. `CORS_ORIGINS` defaults to the local Vite origin; set it in Render to the exact HTTPS frontend origin.
+
+### Frontend variable
+
+Set `VITE_API_BASE_URL=http://localhost:8000` in the root `.env` for development. In production, set it to the API's public HTTPS URL in the frontend service's **build environment**, then rebuild/redeploy the frontend. `VITE_` variables are public and embedded in the built JavaScript: never put credentials or secrets in them.
+
+`PORT` is assigned by the hosting platform. The Docker entry point uses it automatically; do not set it manually.
+
+## Local development
+
+Requirements: Python 3.14+, `uv`, Node.js, npm, and Docker.
+
+1. Copy the environment templates and set `GROQ_API_KEY`.
+2. Start the database and Redis from the repository root:
+
+   ```powershell
+   Set-Location server
+   docker compose --env-file ..\\.env up -d db redis
+   ```
+
+3. In a backend terminal:
+
+   ```powershell
+   Set-Location server
+   uv sync
+   uv run uvicorn app.main:app --reload
+   ```
+
+4. In a frontend terminal:
+
+   ```powershell
+   Set-Location client
+   npm ci
+   npm run dev
+   ```
+
+The frontend is served at `http://localhost:5173` and the API at `http://localhost:8000`. The API initializes its tables on startup; the PostgreSQL instance must have `pgvector` available.
+
+To run the backend and local dependencies in containers instead:
+
+```powershell
+Set-Location server
+docker compose --env-file ..\\.env up --build
 ```
 
-## Supported File Types
+## Deploying to Render
 
-The backend currently allows these extensions:
+Deploy separate API and frontend services, plus a PostgreSQL database:
 
-- .txt
-- .md
-- .csv
-- .json
-- .log
-- .pdf
+1. **API:** create a Docker web service with `server` as its root directory and `Dockerfile` as its Dockerfile. Configure `/health` as the health-check path. The image listens on Render's assigned `PORT`.
+2. **Database:** use the existing production PostgreSQL database and set its private connection URL as `DATABASE_URL_PRODUCTION` in the API service. Confirm the database supports `pgvector` and allows the application to create or use the `vector` extension. Extension availability and permissions depend on the database provider; the API cannot start successfully without it.
+3. **API environment:** set `APP_ENV=production`, `DATABASE_URL_PRODUCTION` to the existing production database's private PostgreSQL URL, `GROQ_API_KEY`, and `CORS_ORIGINS`. Set `CORS_ORIGINS` to the exact HTTPS origin of the deployed frontend, such as `https://your-site.onrender.com`. Mark credentials as secret values. Production database connections require TLS. For optional Redis, configure a production Redis service, set its private URL in `REDIS_URL`, and set `CACHE_ENABLED=true`; otherwise set `CACHE_ENABLED=false`.
+4. **Frontend:** create a static site with `client` as its root directory, `npm ci && npm run build` as its build command, and `dist` as its publish directory. Set `VITE_API_BASE_URL` to the API's public HTTPS URL in the frontend build environment and deploy again whenever that URL changes.
+5. Before deployment, configure a trusted access-control layer for the API, or restrict access to a private network. The application itself does not authenticate users.
 
-Files are validated during upload and rejected if unsupported.
+Production startup validates required settings, a remote PostgreSQL URL, HTTPS CORS origins, and invalid chunking or limit values. Render's local filesystem is ephemeral; documents and vectors are persisted in PostgreSQL, but the embedding model may be downloaded again after an instance restart. Select an instance with enough memory for FastEmbed.
 
-## Configuration
+## API
 
-The backend reads environment variables from `server/.env`. Create this file locally using the following template. Do not commit it; it contains secrets and is ignored by Git.
+- `GET /health` — public platform health check.
+- `POST /api/upload` — uploads a `.txt`, `.md`, `.csv`, `.json`, `.log`, or `.pdf` file.
+- `POST /api/chat` — answers a question using the shared document corpus. An optional `document_id` narrows the search.
 
-```env
-DATABASE_URL=postgresql://raguser:change_me_local_password@localhost:5433/ragdb
-GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
-EMBED_MODEL=BAAI/bge-small-en-v1.5
-EMBED_DIM=384
-CHUNK_SIZE=800
-CHUNK_OVERLAP=150
-TOP_K=5
-MAX_UPLOAD_MB=5
-CORS_ORIGINS=http://localhost:5173
-
-POSTGRES_USER=raguser
-POSTGRES_PASSWORD=change_me_local_password
-POSTGRES_DB=ragdb
-CACHE_ENABLED=true
-REDIS_URL=redis://localhost:6379/0
-CACHE_TTL_SECONDS=3600
-```
-
-Notes:
-- `DATABASE_URL` should match your PostgreSQL configuration.
-- Set `POSTGRES_PASSWORD` to a strong local password. For Docker Compose, use a password without URL-reserved characters because Compose inserts it into the API database URL.
-- Docker Compose uses `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` to configure PostgreSQL and build the API database URL. The database is exposed to the host on port `5433`; containers connect to it on port `5432`.
-- `GROQ_API_KEY` is required for LLM answer generation.
-- `EMBED_DIM` must match the selected embedding model.
-- `CORS_ORIGINS` should include the frontend origin used by the React app.
-- `CACHE_ENABLED=false` disables Redis caching. When caching is enabled, `REDIS_URL` must point to a reachable Redis server.
-- `CACHE_TTL_SECONDS` controls how long embeddings and answers remain cached.
-
-## Setup Instructions
-
-### 1. Clone the Project
-
-```bash
-git clone <repository-url>
-cd rag
-```
-
-### 2. Set Up the Backend
-
-Create `server/.env` from the configuration above, then run these commands from the repository root:
-
-```bash
-cd server
-python -m venv .venv
-source .venv/bin/activate   # Linux/macOS
-# or .venv\Scripts\activate  # Windows PowerShell
-
-uv sync
-```
-
-If you are not using `uv`, install dependencies with:
-
-```bash
-pip install -e .
-```
-
-### 3. Start PostgreSQL and Redis
-
-From a new terminal at the repository root, start PostgreSQL and Redis:
-
-```bash
-cd server
-docker compose up -d db redis
-```
-
-PostgreSQL is exposed to the host on port `5433`; Redis is exposed on `localhost:6379`.
-For a locally run API, set `CACHE_ENABLED=false` in `server/.env` to disable Redis caching.
-
-### 4. Start the API Server
-
-In another terminal at the repository root:
-
-```bash
-cd server
-uvicorn app.main:app --reload
-```
-
-The API will be available at:
-- http://127.0.0.1:8000
-- Swagger Docs: http://127.0.0.1:8000/docs
-
-### 5. Start the Frontend
-
-In another terminal at the repository root:
-
-```bash
-cd client
-npm install
-npm run dev
-```
-
-The frontend will run at:
-- http://localhost:5173
-
-## Running with Docker
-
-The project includes a `docker-compose.yml` for PostgreSQL, Redis, and the API. Create `server/.env` first, then run this from the repository root:
-
-```bash
-cd server
-docker compose up --build
-```
-
-This starts:
-- PostgreSQL database with pgvector
-- Redis cache
-- API container exposed on port 8000
-
-## API Endpoints
-
-### Health Check
-
-```http
-GET /health
-```
-
-Returns:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### Upload a Document
-
-```http
-POST /api/upload
-```
-
-Multipart-form upload:
-- file: uploaded document
-
-Response:
-
-```json
-{
-  "document_id": 1,
-  "filename": "example.pdf",
-  "chunks": 12
-}
-```
-
-### Ask a Question
-
-```http
-POST /api/chat
-```
-
-Request body:
+Chat requests accept JSON such as:
 
 ```json
 {
@@ -304,93 +114,17 @@ Request body:
 }
 ```
 
-`document_id` is optional. If omitted, the system searches across all uploaded documents.
+## Validation
 
-Response (`cached` is `true` for a Redis answer-cache hit and `false` for a newly generated answer):
+Run the frontend type-check/build and lint from `client/`:
 
-```json
-{
-  "answer": "The document states that the main goal is to improve ...",
-  "sources": [
-    {
-      "filename": "example.pdf",
-      "score": 0.87
-    }
-  ],
-  "cached": false
-}
+```powershell
+npm run build
+npm run lint
 ```
 
-Answers without matching document context are not cached. After a successful upload, the Redis corpus version is incremented so answer-cache entries from the previous corpus are no longer used. Query embeddings use a separate cache and remain available until their TTL expires. If Redis is unavailable, cache reads and writes are skipped and the API continues without cache.
+Check the Python sources from `server/`:
 
-## Backend Components
-
-### `app/config.py`
-Defines application settings and loads environment variables.
-
-### `app/db.py`
-Initializes the PostgreSQL connection and creates the required vector tables and indexes.
-
-### `app/embed.py`
-Loads and reuses the embedding model, caches query embeddings in Redis, and converts text into vector representations.
-
-### `app/cache.py`
-Implements Redis caching for query embeddings and chat answers, including TTL handling and answer invalidation after document uploads.
-
-### `app/chunking.py`
-Splits large documents into smaller overlapping chunks for better retrieval quality.
-
-### `app/ingest.py`
-Extracts text from files, chunks it, embeds it, and stores the vectors in the database.
-
-### `app/search.py`
-Embeds the user query and performs similarity search in the vector database.
-
-### `app/llm.py`
-Sends retrieved chunks and the user question to Groq and returns the final answer.
-
-### `app/main.py`
-Contains the FastAPI application, upload endpoint, health endpoint, and chat endpoint.
-
-## Frontend Flow
-
-The frontend is a three-step guided flow:
-
-1. Upload document
-2. Search within the uploaded document or continue to chat
-3. Ask questions and receive grounded answers
-
-Key components:
-- `FileUploader`: accepts file uploads and validates allowed extensions
-- `SearchBar`: collects the user query
-- `ChatScreen`: sends the question to the API and displays responses
-- `parent.tsx`: manages the overall multi-stage flow
-
-## Development Notes
-
-- The backend is designed to preprocess and load the embedding model once at startup to reduce initial latency.
-- `pgvector` is used for cosine similarity search, which is ideal for semantic retrieval.
-- The app stores only the uploaded file name and text chunks, with embeddings kept in the vector database.
-- FastEmbed model files use a separate Docker volume (`model_cache`); Redis caches query embeddings and generated answers.
-- Redis cache failures are logged and fall back to uncached operation. The cache is not authentication; the API currently has no authentication or per-user data isolation.
-
-## Future Enhancements
-
-Possible improvements for this project include:
-
-- Support for DOCX and HTML files
-- Persistent user sessions and per-user document history
-- Better chunking strategies for large structured documents
-- Hybrid search with keyword + vector retrieval
-- Reranking for improved relevance
-- Authentication and authorization
-- Dockerized frontend startup for one-command full-stack development
-- Monitoring, logs, and evaluation metrics
-
-## License
-
-This project is currently provided as a local application codebase without a formal license declaration. If you plan to distribute or publish it, add an explicit license file and update this section accordingly.
-
-## Conclusion
-
-This project demonstrates a practical end-to-end document Q&A workflow using a modern RAG architecture. It is a good foundation for document search, knowledge retrieval, and AI-powered answer generation over uploaded content.
+```powershell
+uv run python -m compileall app
+```

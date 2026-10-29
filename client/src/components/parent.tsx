@@ -3,6 +3,7 @@ import { AnimatePresence } from "motion/react";
 import FileUploader from "./file-uploader";
 import SearchBar from "./searchbar";
 import ChatScreen from "./chat-screen";
+import { apiUrl } from "../api";
 
 type Stage = "upload" | "search" | "chat";
 
@@ -17,7 +18,7 @@ export default function DocumentChatFlow() {
         {stage === "upload" && (
           <FileUploader
             key="upload"
-            uploadUrl="http://localhost:8000/api/upload"
+            uploadUrl={apiUrl("/api/upload")}
             onSuccess={(name) => {
               setFileName(name);
               setStage("search");
@@ -36,7 +37,13 @@ export default function DocumentChatFlow() {
           />
         )}
 
-        {stage === "chat" && <ChatScreen key="chat" initialQuery={query} chatUrl="http://localhost:8000/api/chat" />}
+        {stage === "chat" && (
+          <ChatScreen
+            key="chat"
+            initialQuery={query}
+            chatUrl={apiUrl("/api/chat")}
+          />
+        )}
       </AnimatePresence>
     </div>
   );

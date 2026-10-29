@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import cache
 from app.config import settings
@@ -16,9 +16,10 @@ ALLOWED_EXT = (".txt", ".md", ".csv", ".json", ".log", ".pdf")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_: FastAPI):
+    settings.validate()
     init_db()      # tables / extension / index
-    get_model()    # embedding model pehle hi load kar lo (pehli request slow na ho)
+    get_model()    # Load the embedding model at startup to avoid delaying the first request.
     yield
 
 
@@ -27,14 +28,14 @@ app = FastAPI(title="RAG API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 
 class ChatRequest(BaseModel):
-    query: str
-    document_id: int | None = None  # optional: sirf ek file mein search karne ke liye
+    query: str = Field(max_length=4000)
+    document_id: int | None = None  # Optional: restrict the search to a single file.
 
 
 @app.get("/health")
@@ -42,19 +43,22 @@ def health():
     return {"status": "ok"}
 
 
-# Note: yeh endpoints `def` (sync) hain, FastAPI inhe threadpool mein chalata hai,
-# is liye embedding / Groq ke blocking calls server ko block nahi karte.
+# These synchronous endpoints run in FastAPI's thread pool, so blocking embedding
+# and Groq calls do not block the server's event loop.
 
 
 @app.post("/api/upload")
 def upload(file: UploadFile = File(...)):
     filename = file.filename or "unknown"
+    if len(filename) > 255:
+        raise HTTPException(400, "The file name must not exceed 255 characters.")
     if not filename.lower().endswith(ALLOWED_EXT):
-        raise HTTPException(400, f"Sirf yeh file types allowed hain: {', '.join(ALLOWED_EXT)}")
+        raise HTTPException(400, f"Only these file types are allowed: {', '.join(ALLOWED_EXT)}")
 
-    data = file.file.read()
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, f"File {settings.max_upload_mb}MB se badi hai")
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    data = file.file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(413, f"File exceeds the {settings.max_upload_mb} MB upload limit.")
 
     try:
         doc_id, n_chunks = ingest_document(filename, data)
@@ -68,9 +72,9 @@ def upload(file: UploadFile = File(...)):
 def chat(req: ChatRequest):
     query = req.query.strip()
     if not query:
-        raise HTTPException(400, "Query khali hai")
+        raise HTTPException(400, "Query must not be empty.")
 
-    # 1) Pehle cache dekho: hit ho to search aur Groq dono skip
+    # 1) Check the cache first; on a hit, skip both search and the Groq call.
     cache_version = cache.get_corpus_version()
     cached = cache.get_answer(query, req.document_id, cache_version)
     if cached is not None:
@@ -78,8 +82,8 @@ def chat(req: ChatRequest):
 
     contexts = search_chunks(query, document_id=req.document_id)
     if not contexts:
-        # yeh jawab cache nahi karte, kal file upload ho sakti hai
-        return {"answer": "Pehle koi file upload karein, phir sawal poochein.", "sources": []}
+        # Do not cache this response because a file may be uploaded later.
+        return {"answer": "Upload a document before asking a question.", "sources": []}
 
     try:
         answer = generate_answer(query, contexts)
