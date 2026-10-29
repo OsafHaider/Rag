@@ -34,15 +34,16 @@ Set your Groq API key in the root `.env` before asking questions.
 |---|---|---|
 | `DATABASE_URL_LOCAL` | Local PostgreSQL URL on `localhost:5433` | Not used |
 | `DATABASE_URL_PRODUCTION` | Leave empty | Set in the Render API service to the PostgreSQL provider's private connection URL |
+| `APP_ENV` | `development` | `production` (the Docker image defaults to production; Docker Compose sets development) |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Local Docker Compose database credentials | Not used |
 | `GROQ_API_KEY` | Your development Groq key | Your production Groq key |
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Set in the frontend build environment to the API's public HTTPS URL |
 | `CACHE_ENABLED` | `true` for local Redis; set `false` to disable caching | Set in the Render API service; use `true` only with Redis |
 | `REDIS_URL` | `redis://localhost:6379/0` | Set in the Render API service to a private Redis URL when caching is enabled |
 
-The backend and Vite both load the root `.env`. Docker Compose reads it with `--env-file`, requires local PostgreSQL credentials from it, and constructs a container-only URL. The backend selects `DATABASE_URL_LOCAL` in development and `DATABASE_URL_PRODUCTION` only when `APP_ENV=production`; production will fail startup if its URL is missing or points to a local database. No production URL is currently present in this repository's local environment file. Set the actual existing production database URL in Render's API service as a secret; do not point production at the development database. The application never creates, migrates, or deletes the managed database resource itself, but initializes its tables on startup.
+The backend and Vite both load the root `.env`. Docker Compose reads it with `--env-file`, requires local PostgreSQL credentials from it, and constructs a container-only URL. The backend selects `DATABASE_URL_LOCAL` in development and `DATABASE_URL_PRODUCTION` only when `APP_ENV=production`. The Docker image defaults to production; Docker Compose explicitly sets development for local use. Production will fail startup if its URL is missing or points to a local database. No production URL is currently present in this repository's local environment file. Set the actual existing production database URL in Render's API service as a secret; do not point production at the development database. The application never creates, migrates, or deletes the managed database resource itself, but initializes its tables on startup.
 
-The following stable settings are defaults in `server/app/config.py` and do not need `.env` entries: `GROQ_MODEL`, `EMBED_MODEL`, `EMBED_DIM`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `MAX_UPLOAD_MB`, and `CACHE_TTL_SECONDS`. `APP_ENV` defaults to `development`; set `APP_ENV=production` in the Render API service. `CORS_ORIGINS` defaults to the local Vite origin; set it in Render to the exact HTTPS frontend origin.
+The following stable settings are defaults in `server/app/config.py` and do not need `.env` entries: `GROQ_MODEL`, `EMBED_MODEL`, `EMBED_DIM`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `MAX_UPLOAD_MB`, and `CACHE_TTL_SECONDS`. For Render, confirm `APP_ENV=production` (the Docker image already defaults to this) and set `CORS_ORIGINS` to the exact HTTPS frontend origin.
 
 ### Frontend variable
 
@@ -91,7 +92,7 @@ docker compose --env-file ..\\.env up --build
 
 Deploy separate API and frontend services, plus a PostgreSQL database:
 
-1. **API:** create a Docker web service with `server` as its root directory and `Dockerfile` as its Dockerfile. Configure `/health` as the health-check path. The image listens on Render's assigned `PORT`.
+1. **API:** create a Docker web service with `server` as its **Root Directory** and `Dockerfile` as its **Dockerfile Path** (relative to that root). This makes the build context contain `pyproject.toml`, `uv.lock`, and `app/`, which the Dockerfile copies. Do not leave the root directory at the repository root or set the Dockerfile path to `server/Dockerfile` while the root is already `server`. Configure `/health` as the health-check path. The image listens on Render's assigned `PORT`.
 2. **Database:** use the existing production PostgreSQL database and set its private connection URL as `DATABASE_URL_PRODUCTION` in the API service. Confirm the database supports `pgvector` and allows the application to create or use the `vector` extension. Extension availability and permissions depend on the database provider; the API cannot start successfully without it.
 3. **API environment:** set `APP_ENV=production`, `DATABASE_URL_PRODUCTION` to the existing production database's private PostgreSQL URL, `GROQ_API_KEY`, and `CORS_ORIGINS`. Set `CORS_ORIGINS` to the exact HTTPS origin of the deployed frontend, such as `https://your-site.onrender.com`. Mark credentials as secret values. Production database connections require TLS. For optional Redis, configure a production Redis service, set its private URL in `REDIS_URL`, and set `CACHE_ENABLED=true`; otherwise set `CACHE_ENABLED=false`.
 4. **Frontend:** create a static site with `client` as its root directory, `npm ci && npm run build` as its build command, and `dist` as its publish directory. Set `VITE_API_BASE_URL` to the API's public HTTPS URL in the frontend build environment and deploy again whenever that URL changes.

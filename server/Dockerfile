@@ -15,6 +15,7 @@ RUN mkdir -p /home/appuser/.cache/fastembed \
     && chown -R appuser:appuser /home/appuser/.cache
 
 ENV PATH="/code/.venv/bin:$PATH" \
+    APP_ENV=production \
     FASTEMBED_CACHE_PATH="/home/appuser/.cache/fastembed" \
     PYTHONUNBUFFERED=1
 
